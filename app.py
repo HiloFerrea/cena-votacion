@@ -17,17 +17,24 @@ APP_TITLE = "🍽️ Votación Oficial™ - Cena"
 APP_REGION = "La Plata, Provincia de Buenos Aires"
 TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
-AMIGOS = ["Rulo", "Lucho", "Rami", "Hilo"]
+AMIGOS = ["Rami", "Lucho", "Rafa", "Rulo", "Hilo"]
+
+# OJO: strings para conservar ceros a la izquierda
+PINS = {
+    "Rami":  "157",
+    "Lucho": "023",
+    "Rafa":  "820",
+    "Rulo":  "029",
+    "Hilo":  "623",
+}
 
 OPCIONES_DEFAULT = [
-    "BACCI 🍝",
-    "Bar de siempre 🍺",
-    "Restaurante cheto 🍷",
-    "Pizzería salvadora 🍕",
-    "Club (modo caos) 🕺",
+    "BACCI",
+    "Bar de birras",
+    "Restaurante cheto",
+    "Pizzería cheta, de esas que le gustan a Rami 🍕",
+    "Club",
 ]
-
-RESET_PASSWORD = "asado"  # cambiá si querés
 
 st.set_page_config(page_title=APP_TITLE, page_icon="🍝", layout="centered")
 
@@ -55,7 +62,7 @@ def winner_info(df: pd.DataFrame):
 
 
 def is_club_option(text: str) -> bool:
-    return "club" in text.lower()
+    return text.strip().lower() == "club"
 
 
 # ----------------------------
@@ -64,7 +71,7 @@ def is_club_option(text: str) -> bool:
 init_state()
 
 # ----------------------------
-# SIDEBAR (estilo calculadora)
+# SIDEBAR
 # ----------------------------
 with st.sidebar:
     st.markdown("### 🏛️ Hora oficial del hambre")
@@ -74,27 +81,26 @@ with st.sidebar:
     st.divider()
 
     st.subheader("⚙️ Opciones")
-    st.write("Podés editar opciones (una por línea).")
-    txt = st.text_area(
-        "Opciones",
-        value="\n".join(st.session_state.opciones),
-        height=160
-    )
+    st.caption("Editables (una por línea). Si no querés que las editen, borrá este bloque.")
+    txt = st.text_area("Opciones", value="\n".join(st.session_state.opciones), height=150)
     nuevas = [x.strip() for x in txt.split("\n") if x.strip()]
     if nuevas:
         st.session_state.opciones = nuevas
 
     st.divider()
-    st.subheader("🧨 Admin")
-    clave = st.text_input("Clave de reset", type="password")
-    if st.button("RESET TOTAL 💣", use_container_width=True):
-        if clave == RESET_PASSWORD:
-            st.session_state.votes = {}
-            st.success("Votación reiniciada. Se viene el segundo round.")
-            st.rerun()
-        else:
-            st.error("Clave incorrecta.")
+    st.subheader("🧨 Administración (Solo Hilo)")
+    admin_nombre = st.selectbox("Administrador", AMIGOS)
+    admin_pin = st.text_input("Clave (últimos 3 del teléfono)", type="password", max_chars=3)
 
+    if st.button("RESET TOTAL 💣", use_container_width=True):
+        if admin_nombre != "Hilo":
+            st.error("🚫 Solo Hilo puede reiniciar la votación.")
+        elif admin_pin != PINS["Hilo"]:
+            st.error("🚫 Clave incorrecta.")
+        else:
+            st.session_state.votes = {}
+            st.success("🧹 Votación reiniciada por autoridad competente.")
+            st.rerun()
 
 # ----------------------------
 # HEADER
@@ -110,7 +116,7 @@ st.markdown(
 )
 
 st.title(APP_TITLE)
-st.caption("Democracia gastronómica de baja intensidad. Resultados vinculantes (ponele).")
+st.caption("Democracia gastronómica de baja intensidad. Con PIN y todo.")
 st.divider()
 
 # ----------------------------
@@ -128,6 +134,7 @@ with tab1:
 
     with col1:
         nombre = st.selectbox("¿Quién sos?", AMIGOS)
+        pin = st.text_input("Ingresá tu clave (últimos 3 de tu teléfono)", type="password", max_chars=3)
 
         if nombre in st.session_state.votes:
             st.info(f"✅ Ya votaste: **{st.session_state.votes[nombre]}**")
@@ -143,8 +150,10 @@ with tab1:
                 )
 
             if st.button("VOTAR 🚨", use_container_width=True):
-                if is_club_option(opcion) and (not club_texto or not club_texto.strip()):
-                    st.warning("Especificá qué club, no seas ambiguo 😄")
+                if pin != PINS[nombre]:
+                    st.error("🚫 Clave incorrecta. Intento de fraude gastronómico detectado.")
+                elif is_club_option(opcion) and (not club_texto or not club_texto.strip()):
+                    st.warning("Especificá qué club (Tacuarí, Atenas, etc.).")
                 else:
                     voto_final = opcion
                     if is_club_option(opcion):
