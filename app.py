@@ -1,14 +1,16 @@
 # ============================================
-# 🍽️ Votación Oficial™ - Cena entre Amigos
+# 🍽️ Votación Oficial™ - Cena entre Amigos (MULTIUSUARIO REAL)
 # Autor: Hilo
 # Región: La Plata, PBA
 # ============================================
 
-import streamlit as st
-import pandas as pd
+import random
+import threading
 from datetime import datetime
 from zoneinfo import ZoneInfo
-import random
+
+import pandas as pd
+import streamlit as st
 
 # ----------------------------
 # CONFIG
@@ -21,14 +23,14 @@ AMIGOS = ["Rami", "Lucho", "Rafa", "Rulo", "Hilo"]
 
 # OJO: strings para conservar ceros a la izquierda
 PINS = {
-    "Rami":  "157",
+    "Rami": "157",
     "Lucho": "023",
-    "Rafa":  "820",
-    "Rulo":  "029",
-    "Hilo":  "623",
+    "Rafa": "820",
+    "Rulo": "029",
+    "Hilo": "623",
 }
 
-OPCIONES_DEFAULT = [
+OPCIONES = [
     "BACCI",
     "Bar de birras",
     "Restaurante cheto",
@@ -38,18 +40,47 @@ OPCIONES_DEFAULT = [
 
 st.set_page_config(page_title=APP_TITLE, page_icon="🍝", layout="centered")
 
+
 # ----------------------------
-# FUNCIONES
+# STORE GLOBAL (compartido entre usuarios)
 # ----------------------------
-def now_str():
+@st.cache_resource
+def global_store():
+    # Se comparte entre sesiones mientras el server esté vivo
+    return {
+        "lock": threading.Lock(),
+        "votes": {},  # {persona: voto_final}
+    }
+
+
+def load_votes() -> dict:
+    store = global_store()
+    with store["lock"]:
+        return dict(store["votes"])  # copia
+
+
+def save_votes(votes: dict) -> None:
+    store = global_store()
+    with store["lock"]:
+        store["votes"] = dict(votes)
+
+
+# ----------------------------
+# HELPERS
+# ----------------------------
+def now_str() -> str:
     return datetime.now(TZ).strftime("%d/%m/%Y %H:%M:%S")
 
 
-def init_state():
-    if "votes" not in st.session_state:
-        st.session_state.votes = {}  # {persona: voto_final}
-    if "opciones" not in st.session_state:
-        st.session_state.opciones = OPCIONES_DEFAULT.copy()
+def is_club_option(text: str) -> bool:
+    return text.strip().lower() == "club"
+
+
+def votes_df(votes: dict) -> pd.DataFrame:
+    if not votes:
+        return pd.DataFrame(columns=["persona", "voto"])
+    df = pd.DataFrame([{"persona": k, "voto": v} for k, v in votes.items()])
+    return df.sort_values("persona")
 
 
 def winner_info(df: pd.DataFrame):
@@ -61,14 +92,13 @@ def winner_info(df: pd.DataFrame):
     return counts, leaders, max_v
 
 
-def is_club_option(text: str) -> bool:
-    return text.strip().lower() == "club"
-
-
 # ----------------------------
-# INIT
+# CIERRE DE VOTACIÓN (HOY 23:59)
 # ----------------------------
-init_state()
+now = datetime.now(TZ)
+cierre = now.replace(hour=23, minute=59, second=0, microsecond=0)
+votacion_abierta = now < cierre
+
 
 # ----------------------------
 # SIDEBAR
@@ -77,17 +107,9 @@ with st.sidebar:
     st.markdown("### 🏛️ Hora oficial del hambre")
     st.markdown(f"**{APP_REGION}**")
     st.markdown(f"🕒 {now_str()}")
-    st.caption("Sistema Democrático Gastronómico (SDG v1.0)")
+    st.caption("Sistema Democrático Gastronómico (SDG v1.3 — multiusuario)")
     st.divider()
 
-    st.subheader("⚙️ Opciones")
-    st.caption("Editables (una por línea). Si no querés que las editen, borrá este bloque.")
-    txt = st.text_area("Opciones", value="\n".join(st.session_state.opciones), height=150)
-    nuevas = [x.strip() for x in txt.split("\n") if x.strip()]
-    if nuevas:
-        st.session_state.opciones = nuevas
-
-    st.divider()
     st.subheader("🧨 Administración (Solo Hilo)")
     admin_nombre = st.selectbox("Administrador", AMIGOS)
     admin_pin = st.text_input("Clave (últimos 3 del teléfono)", type="password", max_chars=3)
@@ -98,9 +120,16 @@ with st.sidebar:
         elif admin_pin != PINS["Hilo"]:
             st.error("🚫 Clave incorrecta.")
         else:
-            st.session_state.votes = {}
+            save_votes({})
             st.success("🧹 Votación reiniciada por autoridad competente.")
             st.rerun()
+
+    st.divider()
+    st.subheader("🔄 Actualizar")
+    st.caption("Si estás mirando fijo, esto refresca manualmente.")
+    if st.button("Actualizar resultados", use_container_width=True):
+        st.rerun()
+
 
 # ----------------------------
 # HEADER
@@ -112,12 +141,32 @@ st.markdown(
         <span style='font-size: 18px;'><b>{now_str()}</b></span>
     </div>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 st.title(APP_TITLE)
-st.caption("Democracia gastronómica de baja intensidad. Con PIN y todo.")
+
+# Mensaje + contador de cierre
+if not votacion_abierta:
+    st.error("⛔ Votación cerrada. Se aceptan solo resultados.")
+else:
+    restante = cierre - datetime.now(TZ)
+    total_seconds = int(restante.total_seconds())
+    if total_seconds < 0:
+        total_seconds = 0
+    horas = total_seconds // 3600
+    minutos = (total_seconds % 3600) // 60
+    segundos = total_seconds % 60
+    st.info(
+        "🗳️ **Tiempo para votar hasta hoy 23:59**\n\n"
+        f"⏳ Restan: **{horas:02d}:{minutos:02d}:{segundos:02d}**"
+    )
+
 st.divider()
+
+# 🔄 Auto refresh cada 3 segundos (para ver avance en vivo)
+st.autorefresh(interval=3000, key="auto_refresh")
+
 
 # ----------------------------
 # TABS
@@ -136,11 +185,13 @@ with tab1:
         nombre = st.selectbox("¿Quién sos?", AMIGOS)
         pin = st.text_input("Ingresá tu clave (últimos 3 de tu teléfono)", type="password", max_chars=3)
 
-        if nombre in st.session_state.votes:
-            st.info(f"✅ Ya votaste: **{st.session_state.votes[nombre]}**")
-            st.caption("Si te arrepentís: lobby por WhatsApp como corresponde.")
+        votes_live = load_votes()
+
+        if nombre in votes_live:
+            st.info(f"✅ Ya votaste: **{votes_live[nombre]}**")
+            st.caption("Si querés cambiar el voto, pedile a Hilo el reset 😄")
         else:
-            opcion = st.radio("Elegí el destino gastronómico:", st.session_state.opciones)
+            opcion = st.radio("Elegí el destino gastronómico:", OPCIONES)
 
             club_texto = None
             if is_club_option(opcion):
@@ -149,30 +200,35 @@ with tab1:
                     placeholder="Ej: Club Tacuarí, Atenas, etc."
                 )
 
-            if st.button("VOTAR 🚨", use_container_width=True):
+            if not votacion_abierta:
+                st.warning("La votación está cerrada: no se registran nuevos votos.")
+            elif st.button("VOTAR 🚨", use_container_width=True):
                 if pin != PINS[nombre]:
                     st.error("🚫 Clave incorrecta. Intento de fraude gastronómico detectado.")
-                elif is_club_option(opcion) and (not club_texto or not club_texto.strip()):
-                    st.warning("Especificá qué club (Tacuarí, Atenas, etc.).")
                 else:
-                    voto_final = opcion
-                    if is_club_option(opcion):
-                        voto_final = f"{opcion} — {club_texto.strip()}"
+                    votes_now = load_votes()
+                    if nombre in votes_now:
+                        st.warning("Ese nombre ya votó (según el padrón).")
+                    elif is_club_option(opcion) and (not club_texto or not club_texto.strip()):
+                        st.warning("Especificá qué club (Tacuarí, Atenas, etc.).")
+                    else:
+                        voto_final = opcion
+                        if is_club_option(opcion):
+                            voto_final = f"{opcion} — {club_texto.strip()}"
 
-                    st.session_state.votes[nombre] = voto_final
-                    st.success(f"Voto registrado: **{nombre} → {voto_final}**")
-                    st.rerun()
+                        votes_now[nombre] = voto_final
+                        save_votes(votes_now)
+                        st.success(f"Voto registrado: **{nombre} → {voto_final}**")
+                        st.rerun()
 
     with col2:
-        st.subheader("📌 Estado")
+        st.subheader("📌 Avance")
+        votes_live = load_votes()
         for a in AMIGOS:
-            st.write(f"- {'✅' if a in st.session_state.votes else '⌛'} {a}")
+            st.write(f"- {'✅' if a in votes_live else '⌛'} {a}")
+        st.write("")
+        st.metric("Votaron", f"{len(votes_live)}/{len(AMIGOS)}")
 
-        faltan = [a for a in AMIGOS if a not in st.session_state.votes]
-        if faltan:
-            st.warning("Faltan: " + ", ".join(faltan))
-        else:
-            st.success("¡Votación completa!")
 
 # ----------------------------
 # TAB 2 - RESULTADOS
@@ -180,17 +236,16 @@ with tab1:
 with tab2:
     st.subheader("Resultados en vivo")
 
-    if not st.session_state.votes:
+    votes_live = load_votes()
+    df = votes_df(votes_live)
+
+    if df.empty:
         st.write("Todavía no hay votos. Esto es una asamblea vacía.")
     else:
-        df = pd.DataFrame([{"persona": k, "voto": v} for k, v in st.session_state.votes.items()])
-        df = df.sort_values("persona")
-
         st.write("**Votos registrados:**")
         st.dataframe(df, use_container_width=True, hide_index=True)
 
         st.divider()
-
         counts, leaders, max_v = winner_info(df)
 
         st.write("**Conteo:**")
@@ -209,4 +264,4 @@ with tab2:
             st.success(f"🏆 Va ganando: **{leaders[0]}** con **{max_v}** voto(s).")
         else:
             st.warning(f"🤝 Empate entre: **{', '.join(leaders)}** con **{max_v}** voto(s) cada uno.")
-            st.info("Regla sugerida: desempate por quién llega primero o moneda al aire.")
+            st.info("Tip: con el auto-refresh debería actualizarse solo cada 3 segundos.")
