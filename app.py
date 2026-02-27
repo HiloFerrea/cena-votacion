@@ -6,6 +6,7 @@
 
 import random
 import threading
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -38,6 +39,8 @@ OPCIONES = [
     "Club",
 ]
 
+AUTO_REFRESH_SECONDS = 3
+
 st.set_page_config(page_title=APP_TITLE, page_icon="🍝", layout="centered")
 
 
@@ -46,7 +49,6 @@ st.set_page_config(page_title=APP_TITLE, page_icon="🍝", layout="centered")
 # ----------------------------
 @st.cache_resource
 def global_store():
-    # Se comparte entre sesiones mientras el server esté vivo
     return {
         "lock": threading.Lock(),
         "votes": {},  # {persona: voto_final}
@@ -107,7 +109,7 @@ with st.sidebar:
     st.markdown("### 🏛️ Hora oficial del hambre")
     st.markdown(f"**{APP_REGION}**")
     st.markdown(f"🕒 {now_str()}")
-    st.caption("Sistema Democrático Gastronómico (SDG v1.3 — multiusuario)")
+    st.caption("Sistema Democrático Gastronómico (SDG v1.4 — multiusuario)")
     st.divider()
 
     st.subheader("🧨 Administración (Solo Hilo)")
@@ -126,8 +128,8 @@ with st.sidebar:
 
     st.divider()
     st.subheader("🔄 Actualizar")
-    st.caption("Si estás mirando fijo, esto refresca manualmente.")
-    if st.button("Actualizar resultados", use_container_width=True):
+    st.caption("Por si querés refrescar manualmente.")
+    if st.button("Actualizar ahora", use_container_width=True):
         st.rerun()
 
 
@@ -151,9 +153,7 @@ if not votacion_abierta:
     st.error("⛔ Votación cerrada. Se aceptan solo resultados.")
 else:
     restante = cierre - datetime.now(TZ)
-    total_seconds = int(restante.total_seconds())
-    if total_seconds < 0:
-        total_seconds = 0
+    total_seconds = max(0, int(restante.total_seconds()))
     horas = total_seconds // 3600
     minutos = (total_seconds % 3600) // 60
     segundos = total_seconds % 60
@@ -164,8 +164,17 @@ else:
 
 st.divider()
 
-# 🔄 Auto refresh cada 3 segundos (para ver avance en vivo)
-st.autorefresh(interval=3000, key="auto_refresh")
+
+# ----------------------------
+# AUTO-REFRESH COMPATIBLE (cada 3s)
+# ----------------------------
+# Esto refresca la sesión del usuario cada N segundos para ver el avance sin tocar nada.
+if "last_refresh" not in st.session_state:
+    st.session_state.last_refresh = time.time()
+
+if time.time() - st.session_state.last_refresh >= AUTO_REFRESH_SECONDS:
+    st.session_state.last_refresh = time.time()
+    st.rerun()
 
 
 # ----------------------------
@@ -264,4 +273,4 @@ with tab2:
             st.success(f"🏆 Va ganando: **{leaders[0]}** con **{max_v}** voto(s).")
         else:
             st.warning(f"🤝 Empate entre: **{', '.join(leaders)}** con **{max_v}** voto(s) cada uno.")
-            st.info("Tip: con el auto-refresh debería actualizarse solo cada 3 segundos.")
+            st.info("Con el auto-refresh, esto debería actualizarse solo cada 3 segundos.")
